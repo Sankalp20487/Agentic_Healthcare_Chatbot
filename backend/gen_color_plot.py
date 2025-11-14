@@ -955,6 +955,96 @@ class GeneratingPlots:
                 webbrowser.open('file://' + file_path)
         except Exception as e:
             print(f"Error opening file: {str(e)}")
+    
+    # Function to generate and stream plot via WebSocket    
+    
+    async def generate_and_stream_plot(self, websocket, data, query_type, title):
+        """Generate plot and stream it directly via WebSocket"""
+        try:
+            import io
+            import base64
+            import json
+            
+            print(f"Generating streaming plot for query: {query_type}")
+            print(f"Plot data sample: {str(data)[:200]}...")
+            
+            # Use your existing _generate_plot_from_dataframe method to create the plot
+            # First convert data to DataFrame
+            df = None
+            if isinstance(data, list) and len(data) > 0:
+                df = self._convert_raw_sql_to_dataframe(data, query_type)
+                
+                if df is not None and not df.empty:
+                    print(f"Created DataFrame for streaming plot with shape {df.shape}")
+                    
+                    # Determine the plot type
+                    plot_type = self._determine_plot_type(df, query_type)
+                    print(f"Selected plot type for streaming: {plot_type}")
+                    
+                    # Create a temporary file path for the plot
+                    import tempfile
+                    import os
+                    
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                        temp_path = temp_file.name
+                    
+                    # Use existing plotting functionality
+                    plt.figure(figsize=(12, 6))
+                    
+                    if plot_type == 'bar':
+                        self._create_bar_plot(df, query_type, title)
+                    elif plot_type == 'pie':
+                        self._create_pie_plot(df, query_type, title)
+                    elif plot_type == 'line':
+                        self._create_line_plot(df, query_type, title)
+                    else:
+                        # Default to bar
+                        self._create_bar_plot(df, query_type, title)
+                        
+                    plt.tight_layout()
+                    
+                    # First save to temp file (leveraging existing code)
+                    plt.savefig(temp_path, dpi=100)
+                    
+                    # Then read back and convert to base64
+                    with open(temp_path, 'rb') as f:
+                        plot_data = base64.b64encode(f.read()).decode('utf-8')
+                    
+                    # Clean up temp file
+                    plt.close()
+                    os.unlink(temp_path)
+                    
+                    # Send plot data via WebSocket
+                    print("Sending plot data via WebSocket...")
+                    await websocket.send_text(json.dumps({
+                        "type": "plot",
+                        "format": "base64",
+                        "data": f"data:image/png;base64,{plot_data}"
+                    }))
+                    
+                    print("✅ Plot successfully streamed via WebSocket")
+                    return True
+                else:
+                    print("❌ Failed to create DataFrame from data")
+            else:
+                print(f"❌ Data is not in expected format: {type(data)}")
+            
+            return False
+            
+        except Exception as e:
+            print(f"❌ Error generating streaming plot: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": f"Failed to generate plot: {str(e)}"
+                }))
+            except Exception as ws_error:
+                print(f"❌ Error sending error message via WebSocket: {ws_error}")
+                
+            return False
 
 
 # Direct helper function
